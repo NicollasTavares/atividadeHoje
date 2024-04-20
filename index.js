@@ -1,113 +1,278 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, Button, TextInput, Alert, SafeAreaView, Platform, TouchableOpacity, Image } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { StyleSheet, Text, View, TextInput, Alert, SafeAreaView, Platform, ScrollView, TouchableOpacity } from 'react-native';
 import { getStatusBarHeight } from 'react-native-status-bar-height';
-import { DatabaseConnection } from '../../database/database'
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native'
+import { DatabaseConnection } from '../../database/database';
+import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native'
 
 const db = new DatabaseConnection.getConnection;
 
+export default function TodosClientes() {
+    const route = useRoute();
 
-export default function App() {
+    const [todos, setTodos] = useState([]);
+    const [textPesquisa, setTextPesquisa] = useState(null);
+    const [refresh, setRefresh] = useState(route.params?.refresh ? route.params.setRefresh : false);
+
     const navigation = useNavigation();
 
-    const TodosClientes = () => {
-        navigation.navigate('TodosClientes');
+    const newItem = () => {
+        navigation.navigate('NovoCliente');
     }
 
-    useEffect(() => {
-        db.transaction(tx => {
-            tx.executeSql(
-                "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, data_nasc DATE NOT NULL)",
-                [], 
-                () => console.log('Tabela criada com sucesso'),
-                (_, error) => console.error(error)
-            );
-        });
-    }, []);
+    useFocusEffect(
+        useCallback(() => {
+            if (todos.length !== 0) {
+                mostraRegistros();
+            }
+        }, [refresh])
+    )
+    const mostraRegistros = () => {
+        try {
+            db.transaction(tx => {
+                tx.executeSql(`SELECT 
+                C.ID AS ID_CLIENTE,
+                C.NOME,
+                C.DATA_NASC,
+                T.NUMERO,
+                T.TIPO
+            FROM CLIENTES AS C
+                INNER JOIN telefones_has_clientes AS TC ON C.ID = TC.CLIENTE_ID
+                INNER JOIN tbl_telefones AS T ON TC.TELEFONE_ID = T.ID;`,
+                    [],
+                    (_, { rows }) => {
+                        setTodos(rows._array);
+                        console.log(rows._array);
+                    }
+                );
+            });
+        } catch (error) {
+            console.error('Erro ao buscar todos:', error);
+        }
+    };
+
+    const pesquisaRegistros = () => {
+        try {
+            db.transaction(tx => {
+                tx.executeSql(
+                    "SELECT c.* FROM clientes AS c " +
+                    "JOIN telefones_has_clientes AS thc ON c.id = thc.cliente_id " +
+                    "JOIN tbl_telefones AS t ON thc.telefone_id = t.id " +
+                    "WHERE c.nome LIKE ? OR t.numero LIKE ?",
+                    [`%${textPesquisa}%`, `%${textPesquisa}%`],
+                    (_, { rows }) => {
+                        setTodos(rows._array);
+                    }
+                );
+            });
+        } catch (error) {
+            console.error('Erro ao buscar clientes:', error);
+        }
+    };
 
     useEffect(() => {
-        db.transaction(tx => {
-            tx.executeSql(
-                "CREATE TABLE IF NOT EXISTS tbl_telefones (id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT NOT NULL, tipo TEXT NOT NULL)",
-                [], 
-                () => console.log('Tabela criada com sucesso'),
-                (_, error) => console.error(error)
-            );
-        });
-    }, []);
+        pesquisaRegistros();
+
+    }, [textPesquisa]);
 
     useEffect(() => {
-        db.transaction(tx => {
-            tx.executeSql(
-                "CREATE TABLE IF NOT EXISTS telefones_has_clientes (telefone_id INTEGER NOT NULL, cliente_id INTEGER NOT NULL, FOREIGN KEY (telefone_id) REFERENCES tbl_telefone (id), FOREIGN KEY (cliente_id) REFERENCES clientes (id))",
-                [], 
-                () => console.log('Tabela criada com sucesso'),
-                (_, error) => console.error(error)
-            );
-        });
+        mostraRegistros();
     }, []);
+
+    const handleButtonPress = (dados) => {
+        navigation.navigate('EditItem', dados);
+    };
+
+    const exclui = id => {
+        db.transaction(
+            tx => {
+                tx.executeSql(
+                    'DELETE FROM clientes WHERE id = ?',
+                    [id],
+                    (_, { rowsAffected }) => {
+                        if (rowsAffected > 0) {
+                            pesquisaRegistros();
+                            Alert.alert('Sucesso', 'Registro excluído com sucesso.');
+                        } else {
+                            Alert.alert('Erro', 'Nenhum registro foi excluído, vertifique e tente novamente!');
+                        }
+                    },
+                    (_, error) => {
+                        console.error('Erro ao excluir cliente:', error);
+                        Alert.alert('Erro', 'Ocorreu um erro ao excluir o cliente.');
+                    }
+                );
+            }
+        );
+    };
+
+
 
     return (
-        <SafeAreaProvider>
-            <SafeAreaView style={styles.androidSafeArea}>
-                <View style={styles.container}>
+        <SafeAreaView style={styles.androidSafeArea}>
+            <View>
+                <Text style={styles.title}>Clientes Cadastrados</Text>
+            </View>
 
-                    <Image
-                        source={require('../../../assets/logo.jpg')}
-                        style={{ width: 150, height: 150, borderRadius: 50 }}
-                    />
+            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', paddingBottom: 10 }}>
+                <TextInput
+                    onChangeText={setTextPesquisa}
+                    value={textPesquisa}
+                    style={styles.inputSearch}
+                    placeholder='Informe o nome ou o telefone do cliente'
+                />
+            </View>
 
-                    <Text style={styles.title}>Cadastro de clientes</Text>
+            <ScrollView contentContainerStyle={styles.containerScroll}>
+                {todos.map(cliente => (
+                    <View key={cliente.id} style={[styles.containerFilmes]}>
+                        <View style={styles.logoFilmes}>
+                            <FontAwesome6 name='user' color={'black'} size={72} />
+                        </View>
+                        <View style={styles.clienteItem}>
+                            <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{cliente.nome}</Text>
+                            <View style={styles.alinharEmLinha}>
+                                <Text style={{ fontWeight: 'bold' }}>Telefone: </Text>
+                                <Text>{cliente.numero}</Text>
+                            </View>
+                            <View style={styles.alinharEmLinha}>
+                                <Text style={{ fontWeight: 'bold' }}>Tipo: </Text>
+                                <Text>{cliente.tipo}</Text>
+                            </View>
+                            <View style={styles.viewButtonTable}>
+                                <TouchableOpacity
+                                    style={[styles.alinharEmLinha]}
+                                    onPress={() => {
+                                        Alert.alert(
+                                            "Atenção!",
+                                            'Deseja excluir o registro selecionado?',
+                                            [
+                                                {
+                                                    text: 'OK',
+                                                    onPress: () => exclui(cliente.id)
+                                                },
+                                                {
+                                                    text: 'Cancelar',
+                                                    onPress: () => { return },
+                                                    style: 'cancel',
+                                                }
+                                            ],
+                                        )
+                                    }}>
+                                    <FontAwesome6 name='trash-can' color={'#f5554a'} size={24} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.alinharEmLinha]}
+                                    onPress={() => { handleButtonPress({ nome: cliente.nome, telefone: cliente.telefone, tipo: cliente.tipo, id: cliente.id }) }}>
+                                    <FontAwesome6 name='pen-to-square' color={'#114264'} size={24} />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                ))}
+            </ScrollView>
 
-
-                    <TouchableOpacity
-                        style={styles.button}
-                        onPress={TodosClientes}
-                    >
-                        <Text style={styles.textButton}>Acessar</Text>
-                    </TouchableOpacity>
-
-                </View>
-
-            </SafeAreaView>
-        </SafeAreaProvider >
+            <View style={{ flexDirection: 'row', marginBottom: 20, marginTop: 20, position: 'relative', elevation: 5 }}>
+                <TouchableOpacity
+                    style={[styles.alinharEmLinha, styles.buttonNovoCliente]}
+                    onPress={newItem}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 18, color: 'white' }}>Cadastrar cliente</Text>
+                    <FontAwesome6 name='plus' color={'white'} size={24} />
+                </TouchableOpacity>
+            </View>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: 'white',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 15,
-        width: '100%',
-        gap: 40
-    },
     androidSafeArea: {
         flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
         paddingTop: Platform.OS === 'android' ? getStatusBarHeight() : 0,
-        marginTop: 10,
-        backgroundColor: '#fff'
+        marginTop: 10
     },
-
-    textButton: {
-        color: '#FFF',
-        fontSize: 26,
-        fontWeight: 'bold'
+    alinharEmLinha: {
+        flexDirection: 'row',
+        alignContent: "flex-start",
+        alignItems: 'center'
     },
-
-    button: {
-        borderRadius: 10,
-        backgroundColor: "blue",
-        height: 60,
-        width: '50%',
-        justifyContent: "center",
-        alignItems: "center",
+    container: {
+        width: '90%',
+        backgroundColor: '#fff',
+        padding: 15,
         gap: 10,
-        elevation: 7,
-        marginBottom: 30
+        borderRadius: 10,
+        elevation: 5,
+        marginTop: 5
     }
+    ,
+    containerFilmes: {
+        width: '90%',
+        flexDirection: 'row',
+        backgroundColor: '#fff',
+        padding: 15,
+        gap: 10,
+        borderRadius: 10,
+        elevation: 5,
+        marginTop: 5
+    },
+    containerScroll: {
+        alignItems: 'center',
+        paddingTop: 10,
+        paddingBottom: 20,
+        gap: 15,
+
+    },
+    title: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        marginBottom: 10,
+    },
+    clienteItem: {
+        width: "75%",
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        gap: 5
+    },
+    viewButtonTable: {
+        width: '100%',
+        flexDirection: 'row',
+        gap: 16,
+        justifyContent: 'flex-end',
+        marginBottom: -5,
+
+    },
+    buttonTable: {
+        borderRadius: 8,
+    },
+    buttonNovoCliente: {
+        backgroundColor: 'black',
+        borderRadius: 8,
+        padding: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: '70%',
+        height: 50,
+        gap: 15,
+        elevation: 3
+
+    },
+    logoFilmes: {
+        alignItems: 'center',
+        justifyContent: 'center'
+    },
+    inputSearch: {
+        width: '90%',
+        borderWidth: 1,
+        borderColor: 'gray',
+        padding: 5,
+        borderRadius: 5,
+        backgroundColor: "#fafafa",
+        fontSize: 16,
+        color: "#333",
+        textAlign: 'center'
+    },
+
 
 });
